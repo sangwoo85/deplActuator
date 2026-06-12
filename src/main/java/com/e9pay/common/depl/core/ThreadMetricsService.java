@@ -6,6 +6,7 @@ import java.lang.management.ThreadMXBean;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import com.e9pay.common.depl.web.ActiveRequestInterceptor;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -19,6 +20,9 @@ public class ThreadMetricsService {
         result.put("peak", threadMXBean.getPeakThreadCount());
         result.put("daemon", threadMXBean.getDaemonThreadCount());
         result.put("totalStarted", threadMXBean.getTotalStartedThreadCount());
+        result.put("activeHttpRequestCount", ActiveRequestInterceptor.getActiveRequestCount());
+        result.put("totalHttpRequestCount", ActiveRequestInterceptor.getTotalRequestCount());
+        result.put("maxActiveHttpRequestCount", ActiveRequestInterceptor.getMaxActiveRequestCount());
         result.put("state", getThreadStateCounts(threadMXBean));
 
         long[] deadlockedThreadIds = findDeadlockedThreads(threadMXBean);

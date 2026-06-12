@@ -49,6 +49,68 @@ public class DeplMonitorImportConfig {
 
 또는 라이브러리에서 제공하는 `com.e9pay.common.depl.config.DeplMonitorConfig`를 import해서 사용할 수 있습니다.
 
+## ActiveRequestInterceptor 설정
+
+`ActiveRequestInterceptor`는 현재 처리 중인 HTTP 요청 수를 측정하기 위한 Spring MVC Interceptor입니다.
+
+- ThreadMXBean으로 추정하지 않고 Spring MVC 요청 진입/종료 시점에서 직접 카운트합니다.
+- `preHandle`에서 현재 요청 수와 전체 요청 수를 증가시킵니다.
+- `afterCompletion`에서 정상/예외 여부와 관계없이 현재 요청 수를 감소시킵니다.
+- `/v1/api/actuator/metrics/thread` 응답에 `activeHttpRequestCount`, `totalHttpRequestCount`, `maxActiveHttpRequestCount`가 포함됩니다.
+
+`activeHttpRequestCount`는 JVM 전체 Thread 수가 아니라 현재 처리 중인 HTTP 요청 수입니다. 동기 Spring MVC 구조에서는 요청 1개가 일반적으로 WAS Worker Thread 1개를 점유하므로 현재 요청 처리 중인 Worker Thread 수에 가까운 값으로 볼 수 있습니다. 단, 비동기 요청, 별도 Executor, 배치 Thread, Scheduler Thread는 포함하지 않습니다.
+
+이 Interceptor는 업무 프로젝트의 Spring MVC 설정에 직접 등록해야 합니다. actuator 조회 요청 자체가 카운트에 포함되지 않도록 `/v1/api/actuator/**` 경로는 exclude 하는 것을 권장합니다.
+
+### XML 방식
+
+```xml
+<mvc:interceptors>
+    <mvc:interceptor>
+        <mvc:mapping path="/**" />
+        <mvc:exclude-mapping path="/v1/api/actuator/**" />
+        <bean class="com.e9pay.common.depl.web.ActiveRequestInterceptor" />
+    </mvc:interceptor>
+</mvc:interceptors>
+```
+
+`mvc` namespace가 없다면 XML 상단에 namespace를 추가해야 합니다.
+
+```xml
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:mvc="http://www.springframework.org/schema/mvc"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="
+           http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+           http://www.springframework.org/schema/mvc http://www.springframework.org/schema/mvc/spring-mvc.xsd">
+    ...
+</beans>
+```
+
+### Java Config 방식
+
+```java
+import com.e9pay.common.depl.web.ActiveRequestInterceptor;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.EnableWebMvc;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurerAdapter;
+
+@Configuration
+@EnableWebMvc
+public class WebMvcConfig extends WebMvcConfigurerAdapter {
+
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(new ActiveRequestInterceptor())
+                .addPathPatterns("/**")
+                .excludePathPatterns("/v1/api/actuator/**");
+    }
+}
+```
+
+기존 프로젝트에서 이미 `WebMvcConfigurerAdapter`를 사용 중이면 새 설정 클래스를 만들지 말고 기존 설정 클래스의 `addInterceptors`에 `ActiveRequestInterceptor` 등록만 추가하면 됩니다.
+
 ## Endpoint
 
 모든 actuator 유사 API는 `/v1/api/actuator/` 하위에 있습니다.
@@ -123,6 +185,9 @@ DataSource가 없는 경우:
     "peak": 50,
     "daemon": 20,
     "totalStarted": 120,
+    "activeHttpRequestCount": 3,
+    "totalHttpRequestCount": 152003,
+    "maxActiveHttpRequestCount": 27,
     "state": {
       "NEW": 0,
       "RUNNABLE": 10,
@@ -166,6 +231,30 @@ DataSource가 없는 경우:
     "timestamp": 1718179200000
   },
   "timestamp": 1718179200000
+}
+```
+
+### GET /v1/api/actuator/metrics/thread
+
+```json
+{
+  "current": 85,
+  "peak": 120,
+  "daemon": 60,
+  "totalStarted": 5420,
+  "activeHttpRequestCount": 3,
+  "totalHttpRequestCount": 152003,
+  "maxActiveHttpRequestCount": 27,
+  "state": {
+    "NEW": 0,
+    "RUNNABLE": 12,
+    "BLOCKED": 1,
+    "WAITING": 50,
+    "TIMED_WAITING": 22,
+    "TERMINATED": 0
+  },
+  "deadlock": false,
+  "deadlockedThreadCount": 0
 }
 ```
 

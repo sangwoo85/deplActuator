@@ -20,6 +20,9 @@ public class ThreadMetricsServiceTest {
         assertNotNull(metrics.get("state"));
         assertTrue(metrics.containsKey("daemon"));
         assertTrue(metrics.containsKey("totalStarted"));
+        assertTrue(metrics.containsKey("activeHttpRequestCount"));
+        assertTrue(metrics.containsKey("totalHttpRequestCount"));
+        assertTrue(metrics.containsKey("maxActiveHttpRequestCount"));
         assertTrue(metrics.containsKey("deadlock"));
         assertTrue(metrics.containsKey("deadlockedThreadCount"));
 
