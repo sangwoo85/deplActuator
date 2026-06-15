@@ -49,6 +49,58 @@ public class DeplMonitorImportConfig {
 
 또는 라이브러리에서 제공하는 `com.e9pay.common.depl.config.DeplMonitorConfig`를 import해서 사용할 수 있습니다.
 
+## DB Health DataSource 설정
+
+`/health/db`는 Spring Bean 이름이 `deplHealthDataSource`인 `DataSource`를 우선 사용합니다.
+
+업무 프로젝트마다 실제 `DataSource` Bean 이름이 다를 수 있으므로, 기존 이름을 바꾸지 말고 alias를 추가하는 방식을 권장합니다.
+
+### XML 방식
+
+기존 `DataSource`가 아래처럼 등록되어 있다면:
+
+```xml
+<bean id="mainDataSource" class="...">
+    ...
+</bean>
+```
+
+같은 Spring context 설정 파일에 alias를 추가합니다.
+
+```xml
+<alias name="mainDataSource" alias="deplHealthDataSource" />
+```
+
+JEUS/JNDI datasource를 사용하는 경우도 동일합니다.
+
+```xml
+<jee:jndi-lookup id="jeusDataSource" jndi-name="jdbc/myDs" />
+
+<alias name="jeusDataSource" alias="deplHealthDataSource" />
+```
+
+### Java Config 방식
+
+```java
+import javax.sql.DataSource;
+
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class DeplDataSourceConfig {
+
+    @Bean("deplHealthDataSource")
+    public DataSource deplHealthDataSource(
+            @Qualifier("mainDataSource") DataSource dataSource) {
+        return dataSource;
+    }
+}
+```
+
+`DataSource`가 1개만 있으면 별도 alias 없이 그 `DataSource`를 사용합니다. `DataSource`가 여러 개인 경우에는 반드시 `deplHealthDataSource` alias 또는 bean을 지정해야 합니다.
+
 ## ActiveRequestInterceptor 설정
 
 `ActiveRequestInterceptor`는 현재 처리 중인 HTTP 요청 수를 측정하기 위한 Spring MVC Interceptor입니다.
@@ -159,6 +211,7 @@ DataSource가 없는 경우:
 ```json
 {
   "timestamp": 1718179200000,
+  "dataSource": "deplHealthDataSource",
   "status": "UP",
   "db": "UP"
 }
@@ -169,9 +222,21 @@ DataSource가 없는 경우:
 ```json
 {
   "timestamp": 1718179200000,
+  "dataSource": "deplHealthDataSource",
   "status": "DOWN",
   "db": "DOWN",
   "message": "Connection is not available"
+}
+```
+
+`DataSource`가 여러 개인데 `deplHealthDataSource`가 지정되지 않은 경우:
+
+```json
+{
+  "timestamp": 1718179200000,
+  "status": "UNKNOWN",
+  "db": "DATASOURCE_NOT_SELECTED",
+  "message": "Multiple DataSource beans found [batchDataSource, mainDataSource]. Define alias 'deplHealthDataSource' for the DataSource used by DB health checks."
 }
 ```
 

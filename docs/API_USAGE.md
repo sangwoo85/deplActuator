@@ -78,7 +78,64 @@ public class DeplMonitorImportConfig {
 }
 ```
 
-## 4. ActiveRequestInterceptor 설정
+## 4. DB health DataSource 설정
+
+`/v1/api/actuator/health/db`는 Spring Bean 이름이 `deplHealthDataSource`인 `DataSource`를 우선 사용합니다.
+
+업무 프로젝트마다 실제 `DataSource` Bean 이름이 다를 수 있으므로, 기존 datasource 이름을 변경하지 말고 alias를 추가하는 방식을 권장합니다.
+
+DataSource 선택 순서:
+
+| 순서 | 조건 | 동작 |
+| --- | --- | --- |
+| 1 | `deplHealthDataSource` 이름의 bean 또는 alias가 있음 | 해당 `DataSource` 사용 |
+| 2 | `deplHealthDataSource`가 없고 `DataSource` Bean이 1개만 있음 | 단일 `DataSource` 자동 사용 |
+| 3 | `deplHealthDataSource`가 없고 `DataSource` Bean이 여러 개 있음 | `DATASOURCE_NOT_SELECTED` 반환 |
+| 4 | `DataSource` Bean이 없음 | `NO_DATASOURCE` 반환 |
+
+### XML 설정 방식
+
+`DataSource`가 등록된 Spring 설정 파일에 alias를 추가합니다.
+
+```xml
+<bean id="mainDataSource" class="...">
+    ...
+</bean>
+
+<alias name="mainDataSource" alias="deplHealthDataSource" />
+```
+
+JEUS/JNDI datasource를 사용하는 경우도 동일합니다.
+
+```xml
+<jee:jndi-lookup id="jeusDataSource" jndi-name="jdbc/myDs" />
+
+<alias name="jeusDataSource" alias="deplHealthDataSource" />
+```
+
+alias는 `DbHealthService`가 주입 가능한 Spring context에 등록되어야 합니다. 일반적으로 `DataSource`가 root context에 있으면 root context 설정 파일에, DispatcherServlet context에 있으면 servlet context 설정 파일에 추가합니다.
+
+### Java Config 설정 방식
+
+```java
+import javax.sql.DataSource;
+
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class DeplDataSourceConfig {
+
+    @Bean("deplHealthDataSource")
+    public DataSource deplHealthDataSource(
+            @Qualifier("mainDataSource") DataSource dataSource) {
+        return dataSource;
+    }
+}
+```
+
+## 5. ActiveRequestInterceptor 설정
 
 `ActiveRequestInterceptor`는 현재 처리 중인 HTTP 요청 수를 측정하기 위한 Spring MVC Interceptor입니다. ThreadMXBean으로 추정하지 않고 Spring MVC 요청 진입/종료 시점에서 직접 카운트합니다.
 
@@ -143,7 +200,7 @@ public class WebMvcConfig extends WebMvcConfigurerAdapter {
 
 기존 프로젝트에서 이미 `WebMvcConfigurerAdapter`를 사용 중이면 새 설정 클래스를 만들지 말고 기존 설정 클래스의 `addInterceptors`에 `ActiveRequestInterceptor` 등록만 추가하면 됩니다.
 
-## 5. JSON 응답 설정 확인
+## 6. JSON 응답 설정 확인
 
 컨트롤러는 Spring 4.3 호환성을 위해 `@Controller`와 `@ResponseBody`를 사용합니다. 응답 객체는 `Map<String, Object>`입니다.
 
@@ -167,7 +224,7 @@ Spring MVC XML에서 `<mvc:annotation-driven />` 또는 동등한 설정이 필�
 
 이미 업무 프로젝트에서 JSON API를 운영 중이라면 대부분 추가 설정 없이 동작합니다.
 
-## 6. URL 규칙
+## 7. URL 규칙
 
 모든 API는 아래 base path 하위에 있습니다.
 
@@ -189,7 +246,7 @@ context path가 root라면 아래처럼 호출합니다.
 http://localhost:8080/v1/api/actuator/health
 ```
 
-## 7. Endpoint 목록
+## 8. Endpoint 목록
 
 | Method | Endpoint | 설명 |
 | --- | --- | --- |
@@ -200,11 +257,11 @@ http://localhost:8080/v1/api/actuator/health
 | GET | `/v1/api/actuator/metrics/memory` | JVM memory metrics |
 | GET | `/v1/api/actuator/metrics/system` | Java/OS 시스템 정보 |
 
-## 8. API 호출 예시
+## 9. API 호출 예시
 
 아래 예시는 context path가 root인 경우입니다. 업무 프로젝트의 context path가 있다면 URL 앞에 context path를 붙입니다.
 
-### 8.1 기본 health
+### 9.1 기본 health
 
 ```bash
 curl -s http://localhost:8080/v1/api/actuator/health
@@ -234,7 +291,7 @@ curl -s http://localhost:8080/v1/api/actuator/health
 | `system.osName` | OS 이름 |
 | `system.availableProcessors` | JVM에서 사용 가능한 processor 수 |
 
-### 8.2 DB health
+### 9.2 DB health
 
 ```bash
 curl -s http://localhost:8080/v1/api/actuator/health/db
@@ -255,6 +312,7 @@ DB가 정상인 경우:
 ```json
 {
   "timestamp": 1718179200000,
+  "dataSource": "deplHealthDataSource",
   "status": "UP",
   "db": "UP"
 }
@@ -265,9 +323,21 @@ DB 확인 중 예외가 발생한 경우:
 ```json
 {
   "timestamp": 1718179200000,
+  "dataSource": "deplHealthDataSource",
   "status": "DOWN",
   "db": "DOWN",
   "message": "Connection is not available"
+}
+```
+
+`DataSource`가 여러 개인데 `deplHealthDataSource`가 지정되지 않은 경우:
+
+```json
+{
+  "timestamp": 1718179200000,
+  "status": "UNKNOWN",
+  "db": "DATASOURCE_NOT_SELECTED",
+  "message": "Multiple DataSource beans found [batchDataSource, mainDataSource]. Define alias 'deplHealthDataSource' for the DataSource used by DB health checks."
 }
 ```
 
@@ -276,10 +346,11 @@ DB health 동작 방식:
 | 조건 | status | db | 설명 |
 | --- | --- | --- | --- |
 | Spring Bean으로 등록된 `DataSource`가 없음 | `UNKNOWN` | `NO_DATASOURCE` | DB 상태를 판단하지 않음 |
+| `DataSource`가 여러 개이고 `deplHealthDataSource`가 없음 | `UNKNOWN` | `DATASOURCE_NOT_SELECTED` | DB health에 사용할 `DataSource`를 선택하지 못함 |
 | `DataSource`가 있고 `SELECT 1` 성공 | `UP` | `UP` | DB 연결 정상 |
 | `SELECT 1` 실행 중 예외 발생 | `DOWN` | `DOWN` | `message`에 예외 메시지 포함 |
 
-### 8.3 전체 metrics
+### 9.3 전체 metrics
 
 ```bash
 curl -s http://localhost:8080/v1/api/actuator/metrics
@@ -344,7 +415,7 @@ curl -s http://localhost:8080/v1/api/actuator/metrics
 }
 ```
 
-### 8.4 Thread metrics
+### 9.4 Thread metrics
 
 ```bash
 curl -s http://localhost:8080/v1/api/actuator/metrics/thread
@@ -389,7 +460,7 @@ curl -s http://localhost:8080/v1/api/actuator/metrics/thread
 | `deadlock` | JVM thread deadlock 감지 여부 |
 | `deadlockedThreadCount` | deadlock 상태 thread 수 |
 
-### 8.5 Memory metrics
+### 9.5 Memory metrics
 
 ```bash
 curl -s http://localhost:8080/v1/api/actuator/metrics/memory
@@ -436,7 +507,7 @@ curl -s http://localhost:8080/v1/api/actuator/metrics/memory
 
 단위는 byte입니다. JVM이 최대값을 알 수 없는 경우 `max`가 `-1`일 수 있습니다.
 
-### 8.6 System metrics
+### 9.6 System metrics
 
 ```bash
 curl -s http://localhost:8080/v1/api/actuator/metrics/system
@@ -458,7 +529,7 @@ curl -s http://localhost:8080/v1/api/actuator/metrics/system
 }
 ```
 
-## 9. 운영 보안 권장사항
+## 10. 운영 보안 권장사항
 
 이 API는 JVM thread, memory, OS, DB 연결 상태를 노출합니다. 운영 환경에서는 외부 공개를 금지해야 합니다.
 
@@ -470,7 +541,7 @@ curl -s http://localhost:8080/v1/api/actuator/metrics/system
 - 필요 시 별도 인증 헤더나 관리자 세션 검증 적용
 - 외부 고객망 또는 인터넷에서 직접 호출되지 않도록 라우팅 제외
 
-## 10. 장애 확인 포인트
+## 11. 장애 확인 포인트
 
 ### 404 Not Found
 
@@ -495,6 +566,14 @@ curl -s http://localhost:8080/v1/api/actuator/metrics/system
 - Spring ApplicationContext에 `javax.sql.DataSource` Bean이 등록되어 있는지 확인
 - `DataSource` Bean이 DispatcherServlet context 또는 parent context에서 주입 가능한지 확인
 
+### `/health/db`가 `UNKNOWN`, `DATASOURCE_NOT_SELECTED` 반환
+
+확인 항목:
+
+- Spring ApplicationContext에 `DataSource` Bean이 여러 개 등록되어 있는지 확인
+- DB health에 사용할 `DataSource`에 `deplHealthDataSource` alias가 등록되어 있는지 확인
+- alias가 `DbHealthService`와 같은 context 또는 parent context에서 보이는지 확인
+
 ### `/health/db`가 `DOWN` 반환
 
 확인 항목:
@@ -503,10 +582,11 @@ curl -s http://localhost:8080/v1/api/actuator/metrics/system
 - 사용하는 DB에서 `SELECT 1` 문법을 지원하는지 확인
 - JEUS datasource/JNDI 설정이 정상인지 확인
 
-## 11. 운영 적용 체크리스트
+## 12. 운영 적용 체크리스트
 
 - `depl` dependency 추가
 - `com.e9pay.common.depl` component-scan 추가
+- `DataSource`가 여러 개인 프로젝트는 `deplHealthDataSource` alias 추가
 - `ActiveRequestInterceptor` 등록 및 `/v1/api/actuator/**` exclude 설정
 - JSON 메시지 컨버터 동작 확인
 - context path 포함한 endpoint 호출 확인
